@@ -3,6 +3,92 @@ from tkinter import messagebox
 import ttkbootstrap as ttkb
 import pandas as pd
 import sympy as sp
+import numpy as np
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+
+# --- búsqueda automática de intervalo con cambio de signo ---
+_interval_after_id = None
+
+def find_sign_change_interval(expr_str, samples=400):
+    """
+    Intento robusto de encontrar un subintervalo [a,b] donde f(a)*f(b) < 0.
+    Prueba rangos crecientes por defecto: (-1,1), (-10,10), (-100,100), (-1000,1000).
+    Devuelve la primera pareja (a,b) encontrada o None si no hay cambio de signo.
+    """
+    if not expr_str or expr_str.strip() == '':
+        return None
+
+    # normalizar expresión como en la función bisección
+    txt = expr_str
+    if '=' in txt:
+        left, right = txt.split('=', 1)
+        txt = f"({left}) - ({right})"
+    txt = txt.replace('^', '**')
+
+    x = sp.Symbol('x')
+    try:
+        sym_f = sp.sympify(txt)
+        f_num = sp.lambdify(x, sym_f, modules=['numpy'])
+    except Exception:
+        return None
+
+    ranges = [(-1, 1), (-10, 10), (-100, 100), (-1000, 1000)]
+    for low, high in ranges:
+        xs = np.linspace(low, high, samples)
+        try:
+            ys = f_num(xs)
+            ys = np.array(ys, dtype=float)
+        except Exception:
+            # si la evaluación falla en este rango, intentar el siguiente
+            continue
+
+        finite = np.isfinite(ys)
+        for i in range(len(xs) - 1):
+            if not (finite[i] and finite[i + 1]):
+                continue
+            yi, yj = ys[i], ys[i + 1]
+            if yi == 0:
+                return float(xs[i]), float(xs[i])
+            if yi * yj < 0:
+                return float(xs[i]), float(xs[i + 1])
+    return None
+
+def _try_set_interval():
+    """Intentar fijar a y b automáticamente si están en valores por defecto."""
+    global _interval_after_id
+    _interval_after_id = None
+    expr = entrada_ecuacion.get().strip()
+    # solo sobrescribimos si el usuario no cambió a/b (valores por defecto)
+    cur_a = entrada_a.get().strip()
+    cur_b = entrada_b.get().strip()
+    if cur_a not in ('', '0') or cur_b not in ('', '1'):
+        return
+    res = find_sign_change_interval(expr)
+    if res:
+        a_guess, b_guess = res
+        entrada_a.delete(0, tk.END); entrada_a.insert(0, f"{a_guess:.6g}")
+        entrada_b.delete(0, tk.END); entrada_b.insert(0, f"{b_guess:.6g}")
+        try:
+            etiqueta_intervalo.config(text=f"Intervalo detectado: [{a_guess:.6g}, {b_guess:.6g}]")
+        except Exception:
+            pass
+    else:
+        try:
+            etiqueta_intervalo.config(text="No se encontró intervalo con cambio de signo en rangos probados.")
+        except Exception:
+            pass
+
+def _on_equation_change(event=None):
+    """Debounce: programar intento de detectar intervalo cuando el usuario escribe."""
+    global _interval_after_id
+    try:
+        if _interval_after_id is not None:
+            ventana.after_cancel(_interval_after_id)
+    except Exception:
+        pass
+    _interval_after_id = ventana.after(500, _try_set_interval)
+
 
 # -----------------------
 # Método de Bisección
@@ -133,6 +219,13 @@ def calcular():
             ]
             tabla_iteraciones.insert("", "end", values=valores)
 
+        # Actualizar la gráfica con la función y la raíz encontrada
+        try:
+            plot_function_and_root(expr, a, b, raiz)
+        except Exception:
+            # no fatal: seguimos mostrando el resultado aun si la gráfica falla
+            pass
+
         etiqueta_resultado.config(
             text=f"Raíz aproximada: x = {raiz:.6f}   |   Error final = {error:.6f}   |   Tolerancia = {tol:.6f}"
         )
@@ -164,6 +257,9 @@ ttkb.Label(frame_inputs, text="Ecuación f(x):").grid(row=0, column=0, padx=5)
 entrada_ecuacion = ttkb.Entry(frame_inputs, width=45, font=("Consolas", 11))
 entrada_ecuacion.grid(row=0, column=1, columnspan=4, padx=5)
 entrada_ecuacion.insert(0, "cos(x) = x")
+# Conectar el evento para detectar intervalos por defecto cuando se modifica la ecuación
+entrada_ecuacion.bind('<KeyRelease>', _on_equation_change)
+entrada_ecuacion.bind('<FocusOut>', _on_equation_change)
 
 ttkb.Label(frame_inputs, text="a:").grid(row=1, column=0, padx=5)
 entrada_a = ttkb.Entry(frame_inputs, width=10)
@@ -175,12 +271,24 @@ entrada_b = ttkb.Entry(frame_inputs, width=10)
 entrada_b.grid(row=1, column=3, padx=5)
 entrada_b.insert(0, "1")
 
+
 ttkb.Label(frame_inputs, text="Tolerancia:").grid(row=2, column=0, padx=5)
 entrada_tol = ttkb.Entry(frame_inputs, width=10)
 entrada_tol.grid(row=2, column=1, padx=5)
 entrada_tol.insert(0, "1e-4")
 
-ttkb.Button(frame_inputs, text="Calcular", command=calcular, bootstyle="success").grid(row=3, column=0, columnspan=5, pady=10)
+ttkb.Button(frame_inputs, text="Detectar intervalo", command=_try_set_interval, bootstyle="info").grid(row=3, column=0, padx=5, pady=10)
+ttkb.Button(frame_inputs, text="Calcular", command=calcular, bootstyle="success").grid(row=3, column=1, columnspan=4, pady=10)
+
+# etiqueta que muestra el intervalo detectado (si aplica)
+etiqueta_intervalo = ttkb.Label(frame_inputs, text="", bootstyle="secondary")
+etiqueta_intervalo.grid(row=4, column=0, columnspan=5, pady=(0,8))
+
+# programar una detección inicial poco después de crear la interfaz
+try:
+    ventana.after(100, _try_set_interval)
+except Exception:
+    pass
 
 # --- Teclado matemático ---
 frame_teclado = ttkb.Labelframe(ventana, text="Teclado Matemático")
@@ -218,8 +326,62 @@ for col in cols:
     tabla_iteraciones.column(col, width=110, anchor="center")
 tabla_iteraciones.pack(pady=10, fill="x", padx=20)
 
+# --- Área de gráfica ---
+frame_grafica = ttkb.Frame(ventana)
+frame_grafica.pack(pady=10, fill="both", expand=True, padx=20)
+
+# crear figura matplotlib y canvas para Tk
+fig = Figure(figsize=(6, 3.5), dpi=100)
+ax = fig.add_subplot(111)
+canvas = FigureCanvasTkAgg(fig, master=frame_grafica)
+canvas.get_tk_widget().pack(fill="both", expand=True)
+
 # --- Resultado final ---
 etiqueta_resultado = ttkb.Label(ventana, text="", font=("Segoe UI", 12, "bold"))
 etiqueta_resultado.pack(pady=10)
 
-ventana.mainloop()
+
+def plot_function_and_root(expr_str, a, b, root):
+    """Dibuja la función definida por expr_str en el intervalo [a,b] y marca la raíz."""
+    try:
+        # Preparar expresión (igual que en bisección): permitir '=' y '^'
+        if '=' in expr_str:
+            left, right = expr_str.split('=')
+            expr_plot = f"({left}) - ({right})"
+        else:
+            expr_plot = expr_str
+        expr_plot = expr_plot.replace('^', '**')
+
+        x = sp.Symbol('x')
+        sym_f = sp.sympify(expr_plot)
+        f_num = sp.lambdify(x, sym_f, modules=['numpy'])
+
+        xs = np.linspace(a, b, 400)
+        ys = f_num(xs)
+
+        ax.clear()
+        ax.plot(xs, ys, label='f(x)')
+        # marcar el eje x
+        ax.axhline(0, color='gray', linewidth=0.8)
+        # marcar la raíz encontrada
+        try:
+            yroot = float(f_num(root))
+            ax.plot(root, yroot, 'ro', label=f'raíz ≈ {root:.6g}')
+            ax.axvline(root, color='red', linestyle='--', linewidth=0.8)
+        except Exception:
+            # si la evaluación falla, marcamos sólo la vertical
+            ax.axvline(root, color='red', linestyle='--', linewidth=0.8)
+
+        ax.set_xlim(a, b)
+        ax.set_xlabel('x')
+        ax.set_ylabel('f(x)')
+        ax.legend()
+        ax.grid(True, linestyle=':', linewidth=0.6)
+        canvas.draw()
+    except Exception as e:
+        # Mostrar una advertencia si no se puede graficar
+        messagebox.showwarning('Gráfica', f'No se pudo graficar la función:\n{e}')
+
+
+if __name__ == '__main__':
+    ventana.mainloop()
