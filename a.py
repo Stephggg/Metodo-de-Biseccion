@@ -3,6 +3,9 @@ from tkinter import messagebox
 import ttkbootstrap as ttkb
 import pandas as pd
 import sympy as sp
+import numpy as np
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 # -----------------------
 # Método de Bisección
@@ -133,6 +136,13 @@ def calcular():
             ]
             tabla_iteraciones.insert("", "end", values=valores)
 
+        # Actualizar la gráfica con la función y la raíz encontrada
+        try:
+            plot_function_and_root(expr, a, b, raiz)
+        except Exception:
+            # no fatal: seguimos mostrando el resultado aun si la gráfica falla
+            pass
+
         etiqueta_resultado.config(
             text=f"Raíz aproximada: x = {raiz:.6f}   |   Error final = {error:.6f}   |   Tolerancia = {tol:.6f}"
         )
@@ -218,8 +228,62 @@ for col in cols:
     tabla_iteraciones.column(col, width=110, anchor="center")
 tabla_iteraciones.pack(pady=10, fill="x", padx=20)
 
+# --- Área de gráfica ---
+frame_grafica = ttkb.Frame(ventana)
+frame_grafica.pack(pady=10, fill="both", expand=True, padx=20)
+
+# crear figura matplotlib y canvas para Tk
+fig = Figure(figsize=(6, 3.5), dpi=100)
+ax = fig.add_subplot(111)
+canvas = FigureCanvasTkAgg(fig, master=frame_grafica)
+canvas.get_tk_widget().pack(fill="both", expand=True)
+
 # --- Resultado final ---
 etiqueta_resultado = ttkb.Label(ventana, text="", font=("Segoe UI", 12, "bold"))
 etiqueta_resultado.pack(pady=10)
 
-ventana.mainloop()
+
+def plot_function_and_root(expr_str, a, b, root):
+    """Dibuja la función definida por expr_str en el intervalo [a,b] y marca la raíz."""
+    try:
+        # Preparar expresión (igual que en bisección): permitir '=' y '^'
+        if '=' in expr_str:
+            left, right = expr_str.split('=')
+            expr_plot = f"({left}) - ({right})"
+        else:
+            expr_plot = expr_str
+        expr_plot = expr_plot.replace('^', '**')
+
+        x = sp.Symbol('x')
+        sym_f = sp.sympify(expr_plot)
+        f_num = sp.lambdify(x, sym_f, modules=['numpy'])
+
+        xs = np.linspace(a, b, 400)
+        ys = f_num(xs)
+
+        ax.clear()
+        ax.plot(xs, ys, label='f(x)')
+        # marcar el eje x
+        ax.axhline(0, color='gray', linewidth=0.8)
+        # marcar la raíz encontrada
+        try:
+            yroot = float(f_num(root))
+            ax.plot(root, yroot, 'ro', label=f'raíz ≈ {root:.6g}')
+            ax.axvline(root, color='red', linestyle='--', linewidth=0.8)
+        except Exception:
+            # si la evaluación falla, marcamos sólo la vertical
+            ax.axvline(root, color='red', linestyle='--', linewidth=0.8)
+
+        ax.set_xlim(a, b)
+        ax.set_xlabel('x')
+        ax.set_ylabel('f(x)')
+        ax.legend()
+        ax.grid(True, linestyle=':', linewidth=0.6)
+        canvas.draw()
+    except Exception as e:
+        # Mostrar una advertencia si no se puede graficar
+        messagebox.showwarning('Gráfica', f'No se pudo graficar la función:\n{e}')
+
+
+if __name__ == '__main__':
+    ventana.mainloop()
