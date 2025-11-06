@@ -8,39 +8,76 @@ import sympy as sp
 # Método de Bisección
 # -----------------------
 def biseccion(expr_str, a, b, tol, max_iter=100):
+    """
+    Método de bisección (versión con comentarios simples).
+
+    Parámetros:
+    - expr_str: cadena con la función (p. ej. "cos(x) = x" o "x^3-2*x-5")
+    - a, b: extremos del intervalo donde buscar la raíz
+    - tol: tolerancia para el criterio de parada
+    - max_iter: número máximo de iteraciones
+
+    Devuelve:
+    - tabla: DataFrame con las iteraciones
+    - raiz: aproximación final de la raíz
+    - error_final: |f(c)| en la última evaluación
+
+    Explicación simple del algoritmo (para explicar en clase):
+    1) Convertimos la cadena a una expresión simbólica con sympy.
+    2) Evaluamos f(a) y f(b) y comprobamos que tengan signos opuestos.
+    3) Repetimos: calculamos el punto medio c=(a+b)/2, evaluamos f(c).
+       - Si f(c) es cercano a 0 (o el intervalo es muy pequeño), paramos.
+       - Si f(a) y f(c) tienen signos opuestos, la raíz está en [a,c],
+         si no, está en [c,b].
+    4) Guardamos cada iteración en una tabla para mostrarla.
+    """
+
     x = sp.Symbol('x')
 
-    # Si hay un "=", convertir a forma igualada a 0
+    # Si el usuario escribió una ecuación con '=' la convertimos a f(x)=0
     if '=' in expr_str:
         lado_izq, lado_der = expr_str.split('=')
         expr_str = f"({lado_izq}) - ({lado_der})"
 
-    # Permitir usar ^ como potencia
+    # Permitir usar '^' para potencias (lo convertimos a '**' para sympy)
     f = sp.sympify(expr_str.replace('^', '**'))
+
+    # Evaluaciones iniciales en los extremos (como floats para comparaciones)
     fa = float(f.subs(x, a))
     fb = float(f.subs(x, b))
 
+    # Necesitamos que f(a) y f(b) tengan signos distintos para aplicar el método
     if fa * fb > 0:
         raise ValueError("f(a) y f(b) deben tener signos opuestos.")
 
-    data = []
+    data = []  # lista para almacenar las filas que luego convertimos a DataFrame
+
     for i in range(max_iter):
+        # Punto medio del intervalo
         c = (a + b) / 2
+
+        # Evaluar f en c y convertir a float para poder usarlo en cálculos/condiciones
         fc = float(f.subs(x, c))
+
+        # Producto para saber si f(a) y f(c) tienen signos opuestos
         producto = fa * fc
 
-        # Guardar fila igual a Excel
+        # Guardamos la iteración (índice, intervalo, punto medio y valores de f)
         data.append([i, a, b, c, fa, fb, fc, producto])
 
-        # Criterio de parada
+        # Criterio de parada simple:
+        # - si f(c) está cerca de 0 (|f(c)| < tol)
+        # - o si el intervalo se hace menor que la tolerancia
         if abs(fc) < tol or abs(b - a) / 2 < tol:
             break
 
-        # Actualizar intervalo
+        # Actualizar el intervalo según el signo
         if producto < 0:
+            # La raíz está entre a y c
             b = c
             fb = fc
         else:
+            # La raíz está entre c y b
             a = c
             fa = fc
 
